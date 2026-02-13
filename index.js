@@ -32,6 +32,23 @@ try {
 // Endpoint de prueba para ver que el server está vivo
 app.get("/", (req, res) => res.send("OK - alarma server running"));
 
+// “Base de datos” simple en memoria (luego la cambiamos por DB real)
+const devices = new Map(); // phone -> token
+
+app.post("/register", (req, res) => {
+  const { phone, token } = req.body || {};
+  if (!phone || !token) return res.status(400).json({ ok: false, error: "phone y token requeridos" });
+
+  devices.set(String(phone), String(token));
+  console.log("Registrado:", phone);
+  res.json({ ok: true });
+});
+
+app.get("/devices", (req, res) => {
+  res.json({ ok: true, phones: Array.from(devices.keys()) });
+});
+
+
 // Enviar push de prueba
 app.post("/send-test", async (req, res) => {
   const { token, title, body } = req.body || {};
@@ -53,3 +70,4 @@ app.post("/send-test", async (req, res) => {
 });
 
 app.listen(PORT, () => console.log("Server listening on", PORT));
+
