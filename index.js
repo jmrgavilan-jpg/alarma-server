@@ -9,6 +9,21 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Si llega un JSON mal formado, Express da "Bad Request" en HTML.
+// Con esto lo convertimos a JSON para ver el motivo exacto.
+app.use((err, req, res, next) => {
+  if (err && err.type === "entity.parse.failed") {
+    return res.status(400).json({
+      ok: false,
+      error: "JSON inválido",
+      details: err.message,
+      contentType: req.headers["content-type"],
+    });
+  }
+  next(err);
+});
+
+
 const PORT = process.env.PORT || 3000;
 
 // Firebase Admin
@@ -153,5 +168,6 @@ app.get("/api/history", async (req, res) => {
 });
 
 app.listen(PORT, () => console.log("Server listening on", PORT));
+
 
 
