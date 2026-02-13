@@ -125,17 +125,15 @@ app.post("/api/alert", async (req, res) => {
     if (tokens.length === 0) return res.json({ ok: true, sent: 0, note: "No hay móviles registrados" });
 
     const response = await messaging.sendEachForMulticast({
-      tokens,
-      notification: {
-        title: "🚨 ALARMA",
-        body: `${event.msg} (${event.deviceId})`,
-      },
-      data: {
-        type: event.type,
-        deviceId: event.deviceId,
-        ts: String(event.ts),
-      },
-    });
+  tokens,
+  data: {
+    title: "🚨 ALARMA",
+    body: `${event.msg} (${event.deviceId})`,
+    type: event.type,
+    deviceId: event.deviceId,
+    ts: String(event.ts),
+  },
+});
 
     res.json({ ok: true, sent: response.successCount, failed: response.failureCount });
   } catch (e) {
@@ -155,4 +153,5 @@ app.get("/api/history", async (req, res) => {
 });
 
 app.listen(PORT, () => console.log("Server listening on", PORT));
+
 
