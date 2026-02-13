@@ -23,7 +23,6 @@ app.use((err, req, res, next) => {
   next(err);
 });
 
-
 const PORT = process.env.PORT || 3000;
 
 // Firebase Admin
@@ -83,14 +82,13 @@ async function getAllTokens() {
     .filter(Boolean);
 }
 
+/**
+ * ✅ FIX: historial correcto en RTDB
+ * history/{autoId} = { ts, deviceId, type, msg }
+ */
 async function pushHistory(event) {
   if (!db) throw new Error("RTDB no configurada (FIREBASE_DB_URL)");
-  // Guardamos último evento arriba (limitado a 50)
-  const ref = db.ref("history");
-  const snap = await ref.get();
-  const arr = snap.val() || [];
-  const newArr = [event, ...arr].slice(0, 50);
-  await ref.set(newArr);
+  await db.ref("history").push(event);
 }
 
 // Registrar móvil
@@ -132,6 +130,8 @@ app.post("/api/alert", async (req, res) => {
     };
 
     console.log("ALERT:", event);
+
+    // ✅ Guardar historial (ya no rompe)
     await pushHistory(event);
 
     if (!messaging) return res.status(500).json({ ok: false, error: "Firebase Admin no configurado" });
@@ -139,16 +139,17 @@ app.post("/api/alert", async (req, res) => {
     const tokens = await getAllTokens();
     if (tokens.length === 0) return res.json({ ok: true, sent: 0, note: "No hay móviles registrados" });
 
+    // ✅ data-only (para que tu app pinte la notificación)
     const response = await messaging.sendEachForMulticast({
-  tokens,
-  data: {
-    title: "🚨 ALARMA",
-    body: `${event.msg} (${event.deviceId})`,
-    type: event.type,
-    deviceId: event.deviceId,
-    ts: String(event.ts),
-  },
-});
+      tokens,
+      data: {
+        title: "🚨 ALARMA",
+        body: `${event.msg} (${event.deviceId})`,
+        type: event.type,
+        deviceId: event.deviceId,
+        ts: String(event.ts),
+      },
+    });
 
     res.json({ ok: true, sent: response.successCount, failed: response.failureCount });
   } catch (e) {
@@ -156,18 +157,28 @@ app.post("/api/alert", async (req, res) => {
   }
 });
 
-// Ver historial
+/**
+ * ✅ FIX: leer historial de RTDB (objeto) -> array ordenado
+ * GET /api/history?limit=20
+ */
 app.get("/api/history", async (req, res) => {
   try {
     if (!db) throw new Error("RTDB no configurada (FIREBASE_DB_URL)");
-    const snap = await db.ref("history").get();
-    res.json({ ok: true, history: snap.val() || [] });
+
+    const limit = Math.min(parseInt(req.query.limit || "20", 10) || 20, 100);
+
+    const snap = await db.ref("history").limitToLast(limit).get();
+    const val = snap.val() || {};
+
+    // val = { id1: event1, id2: event2, ... } -> array
+    const arr = Object.entries(val).map(([id, ev]) => ({ id, ...ev }));
+    arr.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+
+    res.json({ ok: true, history: arr });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e.message || e) });
   }
 });
 
 app.listen(PORT, () => console.log("Server listening on", PORT));
-
-
 
