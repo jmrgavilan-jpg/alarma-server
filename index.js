@@ -35,6 +35,59 @@ app.get("/", (req, res) => res.send("OK - alarma server running"));
 // “Base de datos” simple en memoria (luego la cambiamos por DB real)
 const devices = new Map(); // phone -> token
 
+// Historial simple en memoria (luego lo pasamos a DB)
+const history = []; // { ts, type, msg, deviceId }
+
+// Endpoint real de alerta (esto lo llamará el STM32 en el futuro)
+app.post("/api/alert", async (req, res) => {
+  const { deviceId, type, msg, ts } = req.body || {};
+
+  // Validación mínima
+  if (!deviceId) return res.status(400).json({ ok: false, error: "deviceId requerido" });
+
+  const event = {
+    ts: ts || Date.now(),
+    deviceId: String(deviceId),
+    type: type || "INTRUSION",
+    msg: msg || "Intrusión detectada",
+  };
+
+  history.unshift(event);            // lo más nuevo primero
+  history.splice(50);                // máximo 50 eventos
+  console.log("ALERT:", event);
+
+  if (!messaging) return res.status(500).json({ ok: false, error: "Firebase Admin no configurado" });
+
+  // Tokens de todos los registrados
+  const tokens = Array.from(devices.values());
+  if (tokens.length === 0) return res.json({ ok: true, sent: 0, note: "No hay móviles registrados" });
+
+  try {
+    const response = await messaging.sendEachForMulticast({
+      tokens,
+      notification: {
+        title: "🚨 ALARMA",
+        body: `${event.msg} (${event.deviceId})`,
+      },
+      data: {
+        type: event.type,
+        deviceId: event.deviceId,
+        ts: String(event.ts),
+      },
+    });
+
+    res.json({ ok: true, sent: response.successCount, failed: response.failureCount });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Ver historial
+app.get("/api/history", (req, res) => {
+  res.json({ ok: true, history });
+});
+
+
 app.post("/register", (req, res) => {
   const { phone, token } = req.body || {};
   if (!phone || !token) return res.status(400).json({ ok: false, error: "phone y token requeridos" });
@@ -70,4 +123,5 @@ app.post("/send-test", async (req, res) => {
 });
 
 app.listen(PORT, () => console.log("Server listening on", PORT));
+
 
