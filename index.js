@@ -12,8 +12,7 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 
 /**
- * Para NO subir el JSON privado al repo, lo pondremos luego como variable de entorno.
- * De momento el servidor arrancará aunque Firebase no esté configurado.
+ * Para NO subir el JSON privado al repo, lo pondremos como variable de entorno.
  */
 let messaging = null;
 try {
@@ -32,17 +31,36 @@ try {
 // Endpoint de prueba para ver que el server está vivo
 app.get("/", (req, res) => res.send("OK - alarma server running"));
 
+// Ping para comprobar versión/estado
+app.get("/api/ping", (req, res) => {
+  res.json({ ok: true, time: Date.now(), hasFirebase: !!messaging });
+});
+
 // “Base de datos” simple en memoria (luego la cambiamos por DB real)
 const devices = new Map(); // phone -> token
 
 // Historial simple en memoria (luego lo pasamos a DB)
 const history = []; // { ts, type, msg, deviceId }
 
+// Registrar móvil (phone -> token)
+app.post("/register", (req, res) => {
+  const { phone, token } = req.body || {};
+  if (!phone || !token) return res.status(400).json({ ok: false, error: "phone y token requeridos" });
+
+  devices.set(String(phone), String(token));
+  console.log("Registrado:", phone);
+  res.json({ ok: true, count: devices.size });
+});
+
+// Ver teléfonos registrados
+app.get("/devices", (req, res) => {
+  res.json({ ok: true, phones: Array.from(devices.keys()) });
+});
+
 // Endpoint real de alerta (esto lo llamará el STM32 en el futuro)
 app.post("/api/alert", async (req, res) => {
-  const { deviceId, type, msg, ts } = req.body || {};
+  const { deviceId, type, msg, ts, phone } = req.body || {};
 
-  // Validación mínima
   if (!deviceId) return res.status(400).json({ ok: false, error: "deviceId requerido" });
 
   const event = {
@@ -52,14 +70,22 @@ app.post("/api/alert", async (req, res) => {
     msg: msg || "Intrusión detectada",
   };
 
-  history.unshift(event);            // lo más nuevo primero
-  history.splice(50);                // máximo 50 eventos
+  history.unshift(event);
+  history.splice(50);
   console.log("ALERT:", event);
 
   if (!messaging) return res.status(500).json({ ok: false, error: "Firebase Admin no configurado" });
 
-  // Tokens de todos los registrados
-  const tokens = Array.from(devices.values());
+  // Si mandas phone, avisamos solo a ese. Si no, avisamos a todos.
+  let tokens = [];
+  if (phone) {
+    const t = devices.get(String(phone));
+    if (!t) return res.status(404).json({ ok: false, error: "phone no registrado" });
+    tokens = [t];
+  } else {
+    tokens = Array.from(devices.values());
+  }
+
   if (tokens.length === 0) return res.json({ ok: true, sent: 0, note: "No hay móviles registrados" });
 
   try {
@@ -87,30 +113,17 @@ app.get("/api/history", (req, res) => {
   res.json({ ok: true, history });
 });
 
-
-app.post("/register", (req, res) => {
-  const { phone, token } = req.body || {};
-  if (!phone || !token) return res.status(400).json({ ok: false, error: "phone y token requeridos" });
-
-  devices.set(String(phone), String(token));
-  console.log("Registrado:", phone);
-  res.json({ ok: true });
-});
-
-app.get("/devices", (req, res) => {
-  res.json({ ok: true, phones: Array.from(devices.keys()) });
-});
-
-
-// Enviar push de prueba
+// Enviar push de prueba (token o phone)
 app.post("/send-test", async (req, res) => {
-  const { token, title, body } = req.body || {};
+  const { token, phone, title, body } = req.body || {};
   if (!messaging) return res.status(500).json({ ok: false, error: "Firebase Admin no configurado" });
-  if (!token) return res.status(400).json({ ok: false, error: "token requerido" });
+
+  const finalToken = token || (phone ? devices.get(String(phone)) : null);
+  if (!finalToken) return res.status(400).json({ ok: false, error: "token o phone requerido (y que esté registrado)" });
 
   try {
     const msgId = await messaging.send({
-      token,
+      token: finalToken,
       notification: {
         title: title || "Prueba",
         body: body || "Hola desde Render",
@@ -123,5 +136,3 @@ app.post("/send-test", async (req, res) => {
 });
 
 app.listen(PORT, () => console.log("Server listening on", PORT));
-
-
