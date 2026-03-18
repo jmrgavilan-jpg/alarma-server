@@ -119,35 +119,41 @@ app.get("/devices", async (req, res) => {
 // Endpoint real de alerta (STM32 llamará esto)
 app.post("/api/alert", async (req, res) => {
   try {
-    const { deviceId, type, msg, ts } = req.body || {};
-    if (!deviceId) return res.status(400).json({ ok: false, error: "deviceId requerido" });
+    const { deviceId, type, msg, ts, lat, lon } = req.body || {};
+    if (!deviceId) {
+      return res.status(400).json({ ok: false, error: "deviceId requerido" });
+    }
 
     const event = {
       ts: ts || Date.now(),
       deviceId: String(deviceId),
-      type: type || "INTRUSION",
-      msg: msg || "Intrusión detectada",
+      type: type || "CAR_ALARM",
+      msg: msg || "Alarma del coche activada",
+      ...(lat !== undefined ? { lat: Number(lat) } : {}),
+      ...(lon !== undefined ? { lon: Number(lon) } : {}),
     };
 
-    console.log("ALERT:", event);
-
-    // ✅ Guardar historial (ya no rompe)
     await pushHistory(event);
 
-    if (!messaging) return res.status(500).json({ ok: false, error: "Firebase Admin no configurado" });
+    if (!messaging) {
+      return res.status(500).json({ ok: false, error: "Firebase Admin no configurado" });
+    }
 
     const tokens = await getAllTokens();
-    if (tokens.length === 0) return res.json({ ok: true, sent: 0, note: "No hay móviles registrados" });
+    if (tokens.length === 0) {
+      return res.json({ ok: true, sent: 0, note: "No hay móviles registrados" });
+    }
 
-    // ✅ data-only (para que tu app pinte la notificación)
     const response = await messaging.sendEachForMulticast({
       tokens,
       data: {
-        title: "🚨 ALARMA",
-        body: `${event.msg} (${event.deviceId})`,
+        title: "🚗 ALARMA COCHE",
+        body: event.msg,
         type: event.type,
         deviceId: event.deviceId,
         ts: String(event.ts),
+        lat: lat !== undefined ? String(lat) : "",
+        lon: lon !== undefined ? String(lon) : "",
       },
     });
 
